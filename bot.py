@@ -3,6 +3,7 @@ import random
 import json
 from flask import Flask, request, jsonify
 import requests
+from collections import Counter
 
 app = Flask(__name__)
 
@@ -10,7 +11,7 @@ app = Flask(__name__)
 BOT_TOKEN = "8589671232:AAEovF72xAAODgTKWUUtCQT3XmQbAjZJmmk"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# РАСШИРЕННЫЙ СЛОВАРЬ (более 100 слов)
+# СЛОВАРЬ (можно добавлять любые слова, программа сама определит длину)
 WORDS = [
     # 3 буквы
     "КОТ", "ДОМ", "ЛЕС", "ПОЛ", "РОТ", "НОС", "СОН", "ДЕНЬ", "НОЧЬ", "ШАР", 
@@ -32,10 +33,6 @@ WORDS = [
     "ПРОЦЕССОР", "ДИСК", "ФАЙЛ", "ПАПКА", "КНОПКА", "ЭКРАН", "КЛАВИША",
 ]
 
-MIN_WORD_LEN = 3
-MAX_WORD_LEN = 6
-
-# Хранилище
 games = {}
 stats = {}
 
@@ -53,11 +50,9 @@ def send_message(chat_id, text, reply_markup=None):
         payload["reply_markup"] = reply_markup
     
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.json()
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"Ошибка отправки: {e}")
-        return None
 
 def send_typing_action(chat_id):
     """Показывает, что бот печатает"""
@@ -78,58 +73,90 @@ def get_main_keyboard():
         "one_time_keyboard": False
     }
 
-def get_inline_keyboard(game):
-    """Инлайн-кнопки для игры (подсказки)"""
-    return {
-        "inline_keyboard": [
-            [{"text": "🎲 Сдаться", "callback_data": "giveup"}],
-            [{"text": "📊 Статистика", "callback_data": "stats"}]
-        ]
-    }
-
 def get_random_word():
     """Выбирает случайное слово из словаря"""
     return random.choice(WORDS).upper()
 
 def check_guess(guess, target):
-    """Проверяет догадку и возвращает результат"""
+    """
+    ПРАВИЛЬНАЯ проверка догадки с учётом повторяющихся букв
+    Возвращает: результат (🟩🟨⬛), зелёные буквы, жёлтые буквы, НЕПРАВИЛЬНЫЕ буквы (только те, которых нет в слове)
+    """
     guess = guess.upper()
     target = target.upper()
     
     if len(guess) != len(target):
         return None, [], [], []
     
-    result = []
+    # Подсчитываем количество каждой буквы в целевом слове
+    target_letters = Counter(target)
+    
+    # Результат для каждой позиции
+    result = ['⬛'] * len(guess)
     green_letters = []
     yellow_letters = []
-    wrong_letters = []
     
-    # Находим точные совпадения
-    target_copy = list(target)
-    guess_copy = list(guess)
+    # Отмечаем, какие буквы уже использованы в target
+    used_in_target = [False] * len(target)
     
+    # ПЕРВЫЙ ПРОХОД: ищем точные совпадения (зелёные)
     for i in range(len(guess)):
         if guess[i] == target[i]:
-            result.append("🟩")
+            result[i] = '🟩'
             green_letters.append(guess[i])
-            target_copy[i] = None
-            guess_copy[i] = None
+            used_in_target[i] = True
+            target_letters[guess[i]] -= 1
     
-    # Находим буквы не на своих местах
+    # ВТОРОЙ ПРОХОД: ищем буквы, которые есть, но не на своих местах (жёлтые)
     for i in range(len(guess)):
-        if guess_copy[i] is not None and guess_copy[i] in target_copy:
-            result.append("🟨")
-            yellow_letters.append(guess[i])
-            idx = target_copy.index(guess[i])
-            target_copy[idx] = None
-        elif guess_copy[i] is not None:
-            result.append("⬛")
-            wrong_letters.append(guess[i])
+        if result[i] == '🟩':  # Пропускаем уже зелёные
+            continue
+        
+        if guess[i] in target and target_letters[guess[i]] > 0:
+            # Проверяем, есть ли такая буква в target (неиспользованная)
+            for j in range(len(target)):
+                if target[j] == guess[i] and not used_in_target[j]:
+                    result[i] = '🟨'
+                    yellow_letters.append(guess[i])
+                    used_in_target[j] = True
+                    target_letters[guess[i]] -= 1
+                    break
     
-    while len(result) < len(guess):
-        result.append("⬛")
+    # Определяем НЕПРАВИЛЬНЫЕ буквы (которых нет в слове вообще)
+    wrong_letters = []
+    guess_letters = Counter(guess)
+    for letter in guess_letters:
+        if letter not in target:
+            wrong_letters.append(letter)
+        # Если буква есть в слове, но пользователь ввёл её больше раз, чем есть в слове
+        elif guess_letters[letter] > target_letters[letter]:
+            # Добавляем лишние экземпляры как неправильные
+            extra = guess_letters[letter] - target_letters[letter]
+            for _ in range(extra):
+                if letter not in wrong_letters:  # Добавляем только один раз в список
+                    pass  # Не добавляем в wrong_letters, так как буква есть в слове
     
-    return "".join(result), green_letters, yellow_letters, wrong_letters
+    return "".join(result), list(dict.fromkeys(green_letters)), list(dict.fromkeys(yellow_letters)), wrong_letters
+
+def get_mask(game):
+    """
+    Создаёт маску слова на основе всех попыток (только зелёные буквы)
+    Пример: слово БАНАН, попытки: ШАШКА -> _ А _ _ _
+           попытка БАБКА -> Б А _ _ _
+    """
+    target_len = len(game["target"])
+    mask = ['_'] * target_len
+    
+    # Проходим по всем попыткам
+    for attempt in game["attempts"]:
+        word = attempt["word"]
+        # Заполняем зелёные буквы
+        for i, letter in enumerate(word):
+            if i < len(mask) and letter == game["target"][i]:
+                mask[i] = letter
+    
+    # Форматируем с пробелами
+    return ' '.join(mask)
 
 def format_game_state(game):
     """Форматирует текущее состояние игры"""
@@ -142,20 +169,9 @@ def format_game_state(game):
     message += f"Попытка: <b>{len(attempts) + 1}</b>/{max_attempts}\n"
     message += f"Длина слова: <b>{target_len}</b> букв\n\n"
     
-    # Маскировка слова
-    if attempts:
-        last_attempt = attempts[-1]["word"]
-        mask = ""
-        for i, letter in enumerate(last_attempt):
-            if letter in game["green_positions"] and game["green_positions"][i] == letter:
-                mask += f"<b>{letter}</b> "
-            elif letter in game["found_letters"]:
-                mask += f"<i>{letter}</i> "
-            else:
-                mask += "_ "
-        message += f"<code>{mask.strip()}</code>\n\n"
-    else:
-        message += f"<code>{'_ ' * target_len}</code>\n\n"
+    # МАСКА (только отгаданные буквы за все попытки)
+    mask = get_mask(game)
+    message += f"<code>{mask}</code>\n\n"
     
     # Список попыток
     if attempts:
@@ -164,7 +180,7 @@ def format_game_state(game):
             message += f"{i}. {attempt['word']} {attempt['result']}\n"
         message += "\n"
     
-    # Подсказки
+    # ПОДСКАЗКИ (без дублирования)
     all_green = set()
     all_yellow = set()
     all_wrong = set()
@@ -173,6 +189,12 @@ def format_game_state(game):
         all_green.update(attempt.get("green", []))
         all_yellow.update(attempt.get("yellow", []))
         all_wrong.update(attempt.get("wrong", []))
+    
+    # Убираем из жёлтых те, что уже зелёные
+    all_yellow = all_yellow - all_green
+    
+    # Убираем из неправильных те, что есть в зелёных или жёлтых
+    all_wrong = all_wrong - all_green - all_yellow
     
     if all_green:
         message += f"<b>✅ На своих местах:</b> {', '.join(sorted(all_green))}\n"
@@ -204,9 +226,7 @@ def start_game(user_id, chat_id):
         "attempts": [],
         "max_attempts": 6,
         "game_over": False,
-        "won": False,
-        "green_positions": {},
-        "found_letters": set()
+        "won": False
     }
     
     message = f"<b>🎯 НОВАЯ ИГРА!</b>\n\n"
@@ -244,14 +264,6 @@ def make_guess(user_id, chat_id, guess_word):
     if result is None:
         send_message(chat_id, "⚠️ Ошибка! Попробуй ещё раз.", get_main_keyboard())
         return
-    
-    # Обновляем найденные буквы
-    for i, letter in enumerate(guess_word.upper()):
-        if letter == target[i]:
-            game["green_positions"][i] = letter
-            game["found_letters"].add(letter)
-        elif letter in target:
-            game["found_letters"].add(letter)
     
     # Сохраняем попытку
     game["attempts"].append({
@@ -363,11 +375,13 @@ def show_help(chat_id):
     message += f"🟩 — буква на своём месте\n"
     message += f"🟨 — буква есть в слове, но не здесь\n"
     message += f"⬛ — такой буквы нет в слове\n\n"
+    message += f"<b>💡 Важно:</b>\n"
+    message += f"• Если буква встречается в слове один раз, а ты ввёл её дважды — вторая будет ⬛\n"
+    message += f"• Маска показывает только угаданные буквы на своих местах\n\n"
     message += f"<b>🎮 Команды (или кнопки):</b>\n"
     message += f"• Новая игра — начать заново\n"
     message += f"• Статистика — твои успехи\n"
-    message += f"• Сдаться — узнать слово и закончить\n\n"
-    message += f"💡 <b>Совет:</b> Начинай со слов, которые содержат разные буквы!"
+    message += f"• Сдаться — узнать слово и закончить"
     
     send_message(chat_id, message, get_main_keyboard())
 
@@ -383,13 +397,11 @@ def webhook():
             chat_id = msg["chat"]["id"]
             user_id = str(msg["from"]["id"])
             
-            # Показываем, что бот печатает
             send_typing_action(chat_id)
             
             if "text" in msg:
                 text = msg["text"].strip()
                 
-                # Обработка команд и кнопок
                 if text == "/start" or text == "❓ Помощь":
                     show_help(chat_id)
                 
@@ -403,13 +415,11 @@ def webhook():
                     give_up(user_id, chat_id)
                 
                 else:
-                    # Если есть активная игра — пытаемся угадать
                     if user_id in games and not games[user_id].get("game_over", False):
                         make_guess(user_id, chat_id, text)
                     else:
                         send_message(chat_id, "❓ Нет активной игры! Нажми «Новая игра»", get_main_keyboard())
         
-        # Обработка нажатий на инлайн-кнопки
         elif "callback_query" in data:
             callback = data["callback_query"]
             chat_id = callback["message"]["chat"]["id"]
@@ -423,7 +433,6 @@ def webhook():
             elif data_callback == "stats":
                 show_stats(user_id, chat_id)
             
-            # Ответ на callback
             requests.post(f"{TELEGRAM_API}/answerCallbackQuery", json={"callback_query_id": callback["id"]})
         
         return jsonify({"status": "ok"})
