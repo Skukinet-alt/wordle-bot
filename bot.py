@@ -11,7 +11,7 @@ app = Flask(__name__)
 BOT_TOKEN = "8589671232:AAEovF72xAAODgTKWUUtCQT3XmQbAjZJmmk"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# СЛОВАРЬ (можно добавлять любые слова, программа сама определит длину)
+# РАСШИРЕННЫЙ СЛОВАРЬ
 WORDS = [
     # 3 буквы
     "КОТ", "ДОМ", "ЛЕС", "ПОЛ", "РОТ", "НОС", "СОН", "ДЕНЬ", "НОЧЬ", "ШАР", 
@@ -33,8 +33,10 @@ WORDS = [
     "ПРОЦЕССОР", "ДИСК", "ФАЙЛ", "ПАПКА", "КНОПКА", "ЭКРАН", "КЛАВИША",
 ]
 
+# Хранилище
 games = {}
 stats = {}
+user_modes = {}  # Хранит выбранный режим пользователя: "random" или "classic"
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
@@ -66,40 +68,59 @@ def get_main_keyboard():
     """Главное меню с кнопками"""
     return {
         "keyboard": [
-            [{"text": "🎮 Новая игра"}, {"text": "📊 Статистика"}],
-            [{"text": "😢 Сдаться"}, {"text": "❓ Помощь"}]
+            [{"text": "🎮 Новая игра"}, {"text": "⚙️ Сменить режим"}],
+            [{"text": "📊 Статистика"}, {"text": "😢 Сдаться"}],
+            [{"text": "❓ Помощь"}]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
     }
 
-def get_random_word():
-    """Выбирает случайное слово из словаря"""
-    return random.choice(WORDS).upper()
+def get_mode_keyboard():
+    """Клавиатура выбора режима"""
+    return {
+        "keyboard": [
+            [{"text": "🎲 Случайная длина"}, {"text": "📖 Классика (5 букв)"}],
+            [{"text": "🔙 Назад в меню"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False
+    }
+
+def get_words_by_length(length):
+    """Возвращает список слов заданной длины"""
+    return [word for word in WORDS if len(word) == length]
+
+def get_random_word_by_mode(mode):
+    """Возвращает слово в зависимости от выбранного режима"""
+    if mode == "classic":
+        # Классика: только слова из 5 букв
+        five_letter_words = get_words_by_length(5)
+        if five_letter_words:
+            return random.choice(five_letter_words).upper()
+        else:
+            return random.choice(WORDS).upper()
+    else:
+        # Случайная длина (от 3 до 6)
+        return random.choice(WORDS).upper()
 
 def check_guess(guess, target):
-    """
-    ПРАВИЛЬНАЯ проверка догадки с учётом повторяющихся букв
-    Возвращает: результат (🟩🟨⬛), зелёные буквы, жёлтые буквы, НЕПРАВИЛЬНЫЕ буквы (только те, которых нет в слове)
-    """
+    """Проверка догадки с учётом повторяющихся букв"""
     guess = guess.upper()
     target = target.upper()
     
     if len(guess) != len(target):
         return None, [], [], []
     
-    # Подсчитываем количество каждой буквы в целевом слове
     target_letters = Counter(target)
     
-    # Результат для каждой позиции
     result = ['⬛'] * len(guess)
     green_letters = []
     yellow_letters = []
     
-    # Отмечаем, какие буквы уже использованы в target
     used_in_target = [False] * len(target)
     
-    # ПЕРВЫЙ ПРОХОД: ищем точные совпадения (зелёные)
+    # Первый проход: зелёные
     for i in range(len(guess)):
         if guess[i] == target[i]:
             result[i] = '🟩'
@@ -107,13 +128,12 @@ def check_guess(guess, target):
             used_in_target[i] = True
             target_letters[guess[i]] -= 1
     
-    # ВТОРОЙ ПРОХОД: ищем буквы, которые есть, но не на своих местах (жёлтые)
+    # Второй проход: жёлтые
     for i in range(len(guess)):
-        if result[i] == '🟩':  # Пропускаем уже зелёные
+        if result[i] == '🟩':
             continue
         
         if guess[i] in target and target_letters[guess[i]] > 0:
-            # Проверяем, есть ли такая буква в target (неиспользованная)
             for j in range(len(target)):
                 if target[j] == guess[i] and not used_in_target[j]:
                     result[i] = '🟨'
@@ -122,40 +142,26 @@ def check_guess(guess, target):
                     target_letters[guess[i]] -= 1
                     break
     
-    # Определяем НЕПРАВИЛЬНЫЕ буквы (которых нет в слове вообще)
+    # Неправильные буквы
     wrong_letters = []
     guess_letters = Counter(guess)
     for letter in guess_letters:
         if letter not in target:
             wrong_letters.append(letter)
-        # Если буква есть в слове, но пользователь ввёл её больше раз, чем есть в слове
-        elif guess_letters[letter] > target_letters[letter]:
-            # Добавляем лишние экземпляры как неправильные
-            extra = guess_letters[letter] - target_letters[letter]
-            for _ in range(extra):
-                if letter not in wrong_letters:  # Добавляем только один раз в список
-                    pass  # Не добавляем в wrong_letters, так как буква есть в слове
     
     return "".join(result), list(dict.fromkeys(green_letters)), list(dict.fromkeys(yellow_letters)), wrong_letters
 
 def get_mask(game):
-    """
-    Создаёт маску слова на основе всех попыток (только зелёные буквы)
-    Пример: слово БАНАН, попытки: ШАШКА -> _ А _ _ _
-           попытка БАБКА -> Б А _ _ _
-    """
+    """Создаёт маску слова на основе всех попыток"""
     target_len = len(game["target"])
     mask = ['_'] * target_len
     
-    # Проходим по всем попыткам
     for attempt in game["attempts"]:
         word = attempt["word"]
-        # Заполняем зелёные буквы
         for i, letter in enumerate(word):
             if i < len(mask) and letter == game["target"][i]:
                 mask[i] = letter
     
-    # Форматируем с пробелами
     return ' '.join(mask)
 
 def format_game_state(game):
@@ -164,23 +170,19 @@ def format_game_state(game):
     attempts = game["attempts"]
     max_attempts = game["max_attempts"]
     
-    # Заголовок
     message = f"<b>🎮 ИГРА WORDLE</b>\n\n"
     message += f"Попытка: <b>{len(attempts) + 1}</b>/{max_attempts}\n"
     message += f"Длина слова: <b>{target_len}</b> букв\n\n"
     
-    # МАСКА (только отгаданные буквы за все попытки)
     mask = get_mask(game)
     message += f"<code>{mask}</code>\n\n"
     
-    # Список попыток
     if attempts:
         message += "<b>📝 Твои попытки:</b>\n"
         for i, attempt in enumerate(attempts, 1):
             message += f"{i}. {attempt['word']} {attempt['result']}\n"
         message += "\n"
     
-    # ПОДСКАЗКИ (без дублирования)
     all_green = set()
     all_yellow = set()
     all_wrong = set()
@@ -190,10 +192,7 @@ def format_game_state(game):
         all_yellow.update(attempt.get("yellow", []))
         all_wrong.update(attempt.get("wrong", []))
     
-    # Убираем из жёлтых те, что уже зелёные
     all_yellow = all_yellow - all_green
-    
-    # Убираем из неправильных те, что есть в зелёных или жёлтых
     all_wrong = all_wrong - all_green - all_yellow
     
     if all_green:
@@ -218,9 +217,34 @@ def save_stats(user_id, won):
 
 # ========== ОБРАБОТЧИКИ ==========
 
+def show_mode_settings(chat_id):
+    """Показывает настройки выбора режима"""
+    current_mode = user_modes.get(str(chat_id), "random")
+    mode_text = "🎲 Случайная длина" if current_mode == "random" else "📖 Классика (5 букв)"
+    
+    message = f"<b>⚙️ НАСТРОЙКИ РЕЖИМА</b>\n\n"
+    message += f"Текущий режим: <b>{mode_text}</b>\n\n"
+    message += f"<b>📖 Классика (5 букв):</b>\n"
+    message += f"• Всегда слова из 5 букв\n"
+    message += f"• Как в оригинальной Wordle\n\n"
+    message += f"<b>🎲 Случайная длина:</b>\n"
+    message += f"• Слова от 3 до 6 букв\n"
+    message += f"• Сложность меняется\n\n"
+    message += f"Выбери режим кнопкой ниже:"
+    
+    send_message(chat_id, message, get_mode_keyboard())
+
+def set_mode(chat_id, mode):
+    """Устанавливает режим игры для пользователя"""
+    user_modes[str(chat_id)] = mode
+    mode_name = "🎲 Случайная длина" if mode == "random" else "📖 Классика (5 букв)"
+    send_message(chat_id, f"✅ Режим изменён на: <b>{mode_name}</b>\n\nНажми «🎮 Новая игра» чтобы начать!", get_main_keyboard())
+
 def start_game(user_id, chat_id):
-    """Начинает новую игру"""
-    target_word = get_random_word()
+    """Начинает новую игру с учётом выбранного режима"""
+    mode = user_modes.get(str(chat_id), "random")
+    target_word = get_random_word_by_mode(mode)
+    
     games[user_id] = {
         "target": target_word,
         "attempts": [],
@@ -229,10 +253,13 @@ def start_game(user_id, chat_id):
         "won": False
     }
     
+    mode_text = "🎲 случайная длина" if mode == "random" else "📖 классика (5 букв)"
+    
     message = f"<b>🎯 НОВАЯ ИГРА!</b>\n\n"
+    message += f"Режим: <b>{mode_text}</b>\n"
     message += f"Я загадал слово из <b>{len(target_word)} букв</b>.\n"
     message += f"У тебя <b>{games[user_id]['max_attempts']} попыток</b>.\n\n"
-    message += f"💡 <b>Совет:</b> Просто напиши слово, чтобы угадать!\n"
+    message += f"💡 Просто напиши слово, чтобы угадать!\n"
     message += f"❓ Не знаешь слово? Используй кнопку «Сдаться»"
     
     send_message(chat_id, message, get_main_keyboard())
@@ -246,26 +273,22 @@ def make_guess(user_id, chat_id, guess_word):
     game = games[user_id]
     target = game["target"]
     
-    # Проверка длины
     if len(guess_word) != len(target):
         send_message(chat_id, f"⚠️ Слово должно быть из <b>{len(target)} букв</b>! Ты отправил {len(guess_word)}.", get_main_keyboard())
         return
     
-    # Проверка на окончание игры
     if len(game["attempts"]) >= game["max_attempts"]:
         message = f"💀 <b>ИГРА ОКОНЧЕНА!</b>\n\nЗагаданное слово: <b>{target}</b>\n\nНачни новую игру кнопкой «Новая игра»"
         send_message(chat_id, message, get_main_keyboard())
         game["game_over"] = True
         return
     
-    # Проверка догадки
     result, green, yellow, wrong = check_guess(guess_word, target)
     
     if result is None:
         send_message(chat_id, "⚠️ Ошибка! Попробуй ещё раз.", get_main_keyboard())
         return
     
-    # Сохраняем попытку
     game["attempts"].append({
         "word": guess_word.upper(),
         "result": result,
@@ -274,7 +297,7 @@ def make_guess(user_id, chat_id, guess_word):
         "wrong": wrong
     })
     
-    # ПРОВЕРКА ПОБЕДЫ
+    # Победа
     if guess_word.upper() == target:
         game["game_over"] = True
         game["won"] = True
@@ -294,7 +317,7 @@ def make_guess(user_id, chat_id, guess_word):
         send_message(chat_id, message, get_main_keyboard())
         return
     
-    # ПРОВЕРКА ПРОИГРЫША
+    # Поражение
     if len(game["attempts"]) >= game["max_attempts"]:
         game["game_over"] = True
         save_stats(user_id, False)
@@ -312,7 +335,7 @@ def make_guess(user_id, chat_id, guess_word):
         send_message(chat_id, message, get_main_keyboard())
         return
     
-    # ПРОДОЛЖАЕМ ИГРУ
+    # Продолжаем
     message = format_game_state(game)
     send_message(chat_id, message, get_main_keyboard())
 
@@ -371,6 +394,9 @@ def show_help(chat_id):
     message += f"• Просто напиши слово (например: <code>КОТ</code>)\n"
     message += f"• Длина слова подсказывается в начале игры\n"
     message += f"• После каждой попытки ты получаешь подсказки\n\n"
+    message += f"<b>⚙️ Режимы игры:</b>\n"
+    message += f"• <b>Классика (5 букв)</b> — всегда слова из 5 букв\n"
+    message += f"• <b>Случайная длина</b> — слова от 3 до 6 букв\n\n"
     message += f"<b>🎨 Обозначения:</b>\n"
     message += f"🟩 — буква на своём месте\n"
     message += f"🟨 — буква есть в слове, но не здесь\n"
@@ -380,6 +406,7 @@ def show_help(chat_id):
     message += f"• Маска показывает только угаданные буквы на своих местах\n\n"
     message += f"<b>🎮 Команды (или кнопки):</b>\n"
     message += f"• Новая игра — начать заново\n"
+    message += f"• Сменить режим — выбрать сложность\n"
     message += f"• Статистика — твои успехи\n"
     message += f"• Сдаться — узнать слово и закончить"
     
@@ -407,6 +434,18 @@ def webhook():
                 
                 elif text == "/new" or text == "🎮 Новая игра":
                     start_game(user_id, chat_id)
+                
+                elif text == "/mode" or text == "⚙️ Сменить режим":
+                    show_mode_settings(chat_id)
+                
+                elif text == "🎲 Случайная длина":
+                    set_mode(chat_id, "random")
+                
+                elif text == "📖 Классика (5 букв)":
+                    set_mode(chat_id, "classic")
+                
+                elif text == "🔙 Назад в меню":
+                    send_message(chat_id, "🔙 Возврат в главное меню", get_main_keyboard())
                 
                 elif text == "/stats" or text == "📊 Статистика":
                     show_stats(user_id, chat_id)
