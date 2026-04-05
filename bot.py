@@ -314,7 +314,8 @@ def start_game(user_id, chat_id):
     message += f"{mode_desc}\n"
     message += f"У тебя <b>{games[user_id]['max_attempts']} попыток</b>.\n\n"
     message += f"💡 Просто напиши слово, чтобы угадать!\n"
-    message += f"❓ Не знаешь слово? Используй кнопку «Сдаться»"
+    message += f"❓ Не знаешь слово? Используй кнопку «Сдаться»\n"
+    message += f"Попытка 1/{games[user_id]['max_attempts']}"
     
     send_message(chat_id, message, get_main_keyboard())
 
