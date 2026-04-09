@@ -37,7 +37,7 @@ WORDS = [
 MEDICAL_WORDS = [
     # 3-4 буквы
     "ЛУЧ", "ДОЗА", "ЙОД", "АТОМ", "СИЗ", "САЗ", "МРТ", "КТ", "УЗИ", "ЭКГ",
-    "БИОПСИЯ", "ВЕНА", "КОСТЬ", "ЗУБ", "НОС", "РОТ", "ГЛАЗ", "УХО", "ПЕЧЕНЬ",
+    "БИОПСИЯ", "ВЕНА", "КОСТЬ", "ЗУБ", "ПЕЧЕНЬ",
     
     # 5-6 букв
     "МАГНИТ", "ШОК", "ФОКУС", "МОНИТОР", "АППАРАТ", "ИСТОЧНИК", "ДУГА", "ЧЕРЕП",
@@ -100,7 +100,7 @@ def get_mode_keyboard():
     return {
         "keyboard": [
             [{"text": "🎲 Случайная длина"}, {"text": "📖 Классика (5 букв)"}],
-            [{"text": "🏥 Медицинский"}, {"text": "🔙 Назад в меню"}]
+            [{"text": "🏥 REнтген"}, {"text": "🔙 Назад в меню"}]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
@@ -250,7 +250,7 @@ def show_mode_settings(chat_id):
         mode_text = "📖 Классика (5 букв)"
         mode_desc = "слова только из 5 букв"
     else:
-        mode_text = "🏥 Медицинский"
+        mode_text = "🏥 REнтген"
         mode_desc = "медицинские термины разной длины"
     
     message = f"<b>⚙️ НАСТРОЙКИ РЕЖИМА</b>\n\n"
@@ -262,7 +262,7 @@ def show_mode_settings(chat_id):
     message += f"<b>🎲 Случайная длина:</b>\n"
     message += f"• Слова от 3 до 6 букв\n"
     message += f"• Обычные слова\n\n"
-    message += f"<b>🏥 Медицинский:</b>\n"
+    message += f"<b>🏥 REнтген:</b>\n"
     message += f"• Медицинские термины\n"
     message += f"• Слова разной длины (3-12+ букв)\n"
     message += f"• Сложный уровень\n\n"
@@ -281,7 +281,7 @@ def set_mode(chat_id, mode):
         mode_name = "📖 Классика (5 букв)"
         mode_desc = "буду загадывать слова только из 5 букв"
     else:
-        mode_name = "🏥 Медицинский"
+        mode_name = "🏥 REнтген"
         mode_desc = "буду загадывать медицинские термины (сложный уровень!)"
     
     send_message(chat_id, f"✅ Режим изменён на: <b>{mode_name}</b>\n\n{mode_desc}\n\nНажми «🎮 Новая игра» чтобы начать!", get_main_keyboard())
@@ -306,7 +306,7 @@ def start_game(user_id, chat_id):
         mode_text = "📖 классика (5 букв)"
         mode_desc = f"Я загадал слово из <b>5 букв</b>"
     else:
-        mode_text = "🏥 медицинский"
+        mode_text = "🏥 REнтген"
         mode_desc = f"Я загадал медицинский термин из <b>{len(target_word)} букв</b>"
     
     message = f"<b>🎯 НОВАЯ ИГРА!</b>\n\n"
