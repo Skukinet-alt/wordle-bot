@@ -500,7 +500,7 @@ def webhook():
                 elif text == "📖 Классика (5 букв)":
                     set_mode(chat_id, "classic")
                 
-                elif text == "🏥 Медицинский":
+                elif text == "🏥 REнтген":
                     set_mode(chat_id, "medical")
                 
                 elif text == "🔙 Назад в меню":
